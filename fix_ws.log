@@ -1,0 +1,14 @@
+Γ£à Workspace check result: 1
+≡ƒöì Workspace in DB: [
+  {
+    id: 'ws-default',
+    user_id: 'user-1',
+    name: 'My Workspace',
+    description: null,
+    colour: 'text-accent-3',
+    icon: 'Briefcase',
+    sort_order: 0,
+    updated_at: 2026-02-01T17:41:44.562Z,
+    deleted_at: null
+  }
+]

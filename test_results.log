@@ -1,0 +1,9 @@
+[dotenv@17.2.3] injecting env (12) from .env -- tip: ≡ƒ¢á∩╕Å  run anywhere with `dotenvx run -- yourcommand`
+--- Testing PostgreSQL Connection ---
+Host: willpowered.design
+User: ueohxsyzg8cri
+DB:   dbyqepnzhm8tvl
+
+Γ£à SUCCESS!
+Connected to: dbyqepnzhm8tvl
+Version: PostgreSQL 18.1 on x86_64-pc-linux-gnu, compiled by gcc (GCC) 11.5.0 20240719 (Red Hat 11.5.0-14), 64-bit

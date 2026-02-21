@@ -1,0 +1,2 @@
+Workspaces IDs: [ 'ws-default' ]
+Boards: [ { id: 'board-default', workspace_id: 'ws-default' } ]

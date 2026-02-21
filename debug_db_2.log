@@ -1,0 +1,18 @@
+Board "default": {
+  "id": "default",
+  "workspace_id": "ws-default",
+  "user_id": "user-1",
+  "name": "Legacy Board",
+  "description": null,
+  "settings": null,
+  "is_locked": false,
+  "updated_at": "2026-02-01T18:24:07.786Z",
+  "deleted_at": null
+}
+Constraints: [
+  {
+    constraint_name: 'cards_board_id_fkey',
+    table_name: 'cards',
+    referenced_table_name: 'boards'
+  }
+]
