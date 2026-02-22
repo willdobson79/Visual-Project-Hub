@@ -3,8 +3,6 @@
 import { motion } from 'framer-motion';
 import {
   Briefcase,
-  Home,
-  Music,
   Plus,
   LayoutDashboard,
   Settings,
@@ -13,9 +11,11 @@ import {
   Box,
   Clock,
   Trash2,
-  Edit2,
   Folder,
-  History
+  History,
+  Upload,
+  Filter,
+  Inbox
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
@@ -27,6 +27,11 @@ import NewWorkspaceModal from '@/components/dashboard/NewWorkspaceModal';
 import GlobalStats from '@/components/dashboard/GlobalStats';
 import HistoryPanel from '@/components/dashboard/HistoryPanel';
 import SyncIndicator from '@/components/global/SyncIndicator';
+import ImportModal from '@/components/dashboard/ImportModal';
+import ImportInbox from '@/components/dashboard/ImportInbox';
+import CategoryFilter from '@/components/dashboard/CategoryFilter';
+
+type ActiveView = 'boards' | 'import-inbox' | 'category-filter';
 
 export default function Dashboard() {
   const router = useRouter();
@@ -42,11 +47,18 @@ export default function Dashboard() {
 
   const [activeTab, setActiveTab] = useState<string | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<ActiveView>('boards');
   const [isNewBoardModalOpen, setIsNewBoardModalOpen] = useState(false);
   const [isNewWorkspaceModalOpen, setIsNewWorkspaceModalOpen] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
+  const inboxCount = useLiveQuery(
+    () => db.cards.filter(c => c.isImported === true && !c.deletedAt).count(),
+    []
+  );
 
   // Auto-Initialisation
   useEffect(() => {
@@ -175,6 +187,54 @@ export default function Dashboard() {
     <div className="flex h-[calc(100vh-6rem)] overflow-hidden">
       {/* Sidebar */}
       <aside className="w-72 bg-slate-950/40 border-r border-white/5 p-6 flex flex-col gap-6 hidden lg:flex">
+        {/* Import button */}
+        <button
+          onClick={() => setIsImportModalOpen(true)}
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-accent-1/20 border border-accent-1/40 text-accent-1 hover:bg-accent-1/30 transition-all font-semibold text-sm"
+        >
+          <Upload size={16} />
+          <span>Import with AI</span>
+        </button>
+
+        {/* View switcher */}
+        <div className="flex flex-col gap-1">
+          <button
+            onClick={() => setActiveView('boards')}
+            className={cn(
+              'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all',
+              activeView === 'boards' ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'
+            )}
+          >
+            <LayoutDashboard size={16} />
+            <span>Boards</span>
+          </button>
+          <button
+            onClick={() => setActiveView('import-inbox')}
+            className={cn(
+              'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all',
+              activeView === 'import-inbox' ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'
+            )}
+          >
+            <Inbox size={16} />
+            <span>Import Inbox</span>
+            {(inboxCount ?? 0) > 0 && (
+              <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 bg-accent-1/30 border border-accent-1/40 text-accent-1 rounded-full">
+                {inboxCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveView('category-filter')}
+            className={cn(
+              'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all',
+              activeView === 'category-filter' ? 'bg-white/10 text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'
+            )}
+          >
+            <Filter size={16} />
+            <span>By Category</span>
+          </button>
+        </div>
+
         {/* Tabs Section */}
         <div>
           <div className="flex items-center justify-between mb-4">
@@ -271,118 +331,134 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto p-8 lg:p-12">
-        <header className="mb-12">
-          <motion.div
-            initial={{ opacity: 0, scale: 1.25, filter: 'blur(12px)' }}
-            animate={{ opacity: 1, scale: 1, filter: 'blur(0)' }}
-            transition={{ duration: 1.8, ease: [0.16, 1, 0.3, 1] }}
-          >
-            <h1 className="text-4xl lg:text-5xl font-bold text-white mb-4 leading-tight">
-              Welcome back, <span className="highlighted">Will!</span>
-            </h1>
-            <p className="text-large max-w-2xl">
-              You have <span className="text-white">{(pendingTasks || 0)} pending tasks</span> across <span className="text-white">{(activeBoardsCount || 0)} active boards</span>. Ready to dive back in?
-            </p>
-          </motion.div>
-        </header>
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          {[
-            { label: 'Total Cards', value: cardCount?.toString() || '0', icon: <Box className="text-accent-3" />, trend: 'Live from DB' },
-            {
-              label: 'Completion',
-              value: cardCount ? `${Math.round(((completedTasks || 0) / cardCount) * 100)}%` : '0%',
-              icon: <TrendingUp className="text-accent-2" />,
-              trend: `Done: ${completedTasks || 0} / ${cardCount || 0}`
-            },
-            { label: 'Cloud Status', value: 'Ready', icon: <Clock className="text-accent-1" />, trend: 'PostgreSQL Active' },
-          ].map((stat, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 + i * 0.1 }}
-              className="glass-card p-6 flex items-center gap-6"
-            >
-              <div className="icon-box w-14 h-14 text-2xl">
-                {stat.icon}
-              </div>
-              <div>
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">{stat.label}</p>
-                <p className="text-3xl font-bold text-white">{stat.value}</p>
-                <p className="text-xs text-slate-400 mt-1">{stat.trend}</p>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-
-        {/* Recent Boards */}
-        <div>
-          <div className="flex items-center justify-between mb-8">
-            <h2 className="text-2xl font-bold text-white">Recent Boards</h2>
-            <button className="text-sm font-semibold text-accent-3 hover:text-accent-3/80 transition-colors flex items-center gap-1 group">
-              View all <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
-            {(recentBoards || []).filter((b: any) => activeWorkspace ? b.workspaceId === activeWorkspace : true).map((board: any, i: number) => (
+        {/* ── BOARDS VIEW ── */}
+        {activeView === 'boards' && (
+          <>
+            <header className="mb-12">
               <motion.div
-                key={board.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.5 + i * 0.1 }}
-                whileHover={{ y: -5 }}
-                onClick={() => router.push(`/board/${board.id}`)}
-                className="glass-panel overflow-hidden cursor-pointer group"
+                initial={{ opacity: 0, scale: 1.25, filter: 'blur(12px)' }}
+                animate={{ opacity: 1, scale: 1, filter: 'blur(0)' }}
+                transition={{ duration: 1.8, ease: [0.16, 1, 0.3, 1] }}
               >
-                <div className="h-40 bg-slate-900 relative overflow-hidden">
-                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950 to-transparent z-10" />
-                  <div className="absolute inset-0 bg-slate-800 flex items-center justify-center opacity-50">
-                    <LayoutDashboard size={48} className="text-slate-700" />
-                  </div>
-                  <div className="absolute top-4 left-4 z-20">
-                    <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 bg-accent-1/20 border border-accent-1/30 text-accent-1 rounded">
-                      Workspace
-                    </span>
-                  </div>
-                  <button
-                    onClick={(e) => handleDeleteBoard(e, board.id)}
-                    className="absolute top-4 right-4 z-30 w-8 h-8 rounded-lg bg-slate-950/80 border border-white/10 flex items-center justify-center text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-                <div className="p-6">
-                  <h3 className="text-xl font-bold text-white mb-2 group-hover:text-accent-3 transition-colors">{board.name}</h3>
-                  <div className="flex items-center justify-between mt-6">
-                    <div className="flex items-center gap-2 text-xs text-slate-500">
-                      <Clock size={12} />
-                      <span>{new Date(board.updatedAt).toLocaleDateString()}</span>
-                    </div>
-                    <span className="text-xs font-semibold px-2 py-0.5 bg-slate-800 border border-white/10 rounded-full text-slate-300">
-                      Active
-                    </span>
-                  </div>
-                </div>
+                <h1 className="text-4xl lg:text-5xl font-bold text-white mb-4 leading-tight">
+                  Welcome back, <span className="highlighted">Will!</span>
+                </h1>
+                <p className="text-large max-w-2xl">
+                  You have <span className="text-white">{(pendingTasks || 0)} pending tasks</span> across <span className="text-white">{(activeBoardsCount || 0)} active boards</span>. Ready to dive back in?
+                </p>
               </motion.div>
-            ))}
+            </header>
 
-            <motion.button
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.8 }}
-              onClick={() => setIsNewBoardModalOpen(true)}
-              className="glass-panel border-dashed border-2 border-white/5 flex flex-col items-center justify-center p-8 text-slate-500 hover:text-white hover:border-accent-1/50 transition-all gap-4 group"
-            >
-              <div className="w-12 h-12 rounded-full border border-dashed border-white/20 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Plus size={24} />
+            {/* Quick Stats */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+              {[
+                { label: 'Total Cards', value: cardCount?.toString() || '0', icon: <Box className="text-accent-3" />, trend: 'Live from DB' },
+                {
+                  label: 'Completion',
+                  value: cardCount ? `${Math.round(((completedTasks || 0) / cardCount) * 100)}%` : '0%',
+                  icon: <TrendingUp className="text-accent-2" />,
+                  trend: `Done: ${completedTasks || 0} / ${cardCount || 0}`
+                },
+                { label: 'Cloud Status', value: 'Ready', icon: <Clock className="text-accent-1" />, trend: 'PostgreSQL Active' },
+              ].map((stat, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 + i * 0.1 }}
+                  className="glass-card p-6 flex items-center gap-6"
+                >
+                  <div className="icon-box w-14 h-14 text-2xl">
+                    {stat.icon}
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">{stat.label}</p>
+                    <p className="text-3xl font-bold text-white">{stat.value}</p>
+                    <p className="text-xs text-slate-400 mt-1">{stat.trend}</p>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+
+            {/* Recent Boards */}
+            <div>
+              <div className="flex items-center justify-between mb-8">
+                <h2 className="text-2xl font-bold text-white">Recent Boards</h2>
+                <button className="text-sm font-semibold text-accent-3 hover:text-accent-3/80 transition-colors flex items-center gap-1 group">
+                  View all <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                </button>
               </div>
-              <span className="font-bold uppercase tracking-widest text-sm">Create New Board</span>
-            </motion.button>
-          </div>
-        </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
+                {(recentBoards || []).filter((b: any) => activeWorkspace ? b.workspaceId === activeWorkspace : true).map((board: any, i: number) => (
+                  <motion.div
+                    key={board.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.5 + i * 0.1 }}
+                    whileHover={{ y: -5 }}
+                    onClick={() => router.push(`/board/${board.id}`)}
+                    className="glass-panel overflow-hidden cursor-pointer group"
+                  >
+                    <div className="h-40 bg-slate-900 relative overflow-hidden">
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950 to-transparent z-10" />
+                      <div className="absolute inset-0 bg-slate-800 flex items-center justify-center opacity-50">
+                        <LayoutDashboard size={48} className="text-slate-700" />
+                      </div>
+                      <div className="absolute top-4 left-4 z-20">
+                        <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-1 bg-accent-1/20 border border-accent-1/30 text-accent-1 rounded">
+                          Workspace
+                        </span>
+                      </div>
+                      <button
+                        onClick={(e) => handleDeleteBoard(e, board.id)}
+                        className="absolute top-4 right-4 z-30 w-8 h-8 rounded-lg bg-slate-950/80 border border-white/10 flex items-center justify-center text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                    <div className="p-6">
+                      <h3 className="text-xl font-bold text-white mb-2 group-hover:text-accent-3 transition-colors">{board.name}</h3>
+                      <div className="flex items-center justify-between mt-6">
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                          <Clock size={12} />
+                          <span>{new Date(board.updatedAt).toLocaleDateString()}</span>
+                        </div>
+                        <span className="text-xs font-semibold px-2 py-0.5 bg-slate-800 border border-white/10 rounded-full text-slate-300">
+                          Active
+                        </span>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+
+                <motion.button
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.8 }}
+                  onClick={() => setIsNewBoardModalOpen(true)}
+                  className="glass-panel border-dashed border-2 border-white/5 flex flex-col items-center justify-center p-8 text-slate-500 hover:text-white hover:border-accent-1/50 transition-all gap-4 group"
+                >
+                  <div className="w-12 h-12 rounded-full border border-dashed border-white/20 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <Plus size={24} />
+                  </div>
+                  <span className="font-bold uppercase tracking-widest text-sm">Create New Board</span>
+                </motion.button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ── IMPORT INBOX VIEW ── */}
+        {activeView === 'import-inbox' && (
+          <ImportInbox />
+        )}
+
+        {/* ── CATEGORY FILTER VIEW ── */}
+        {activeView === 'category-filter' && (
+          <CategoryFilter />
+        )}
 
         {activeWorkspace && (
           <NewBoardModal
@@ -403,6 +479,11 @@ export default function Dashboard() {
         <HistoryPanel
           isOpen={isHistoryOpen}
           onClose={() => setIsHistoryOpen(false)}
+        />
+        <ImportModal
+          isOpen={isImportModalOpen}
+          onClose={() => setIsImportModalOpen(false)}
+          onSaved={() => setActiveView('import-inbox')}
         />
       </main>
     </div>
