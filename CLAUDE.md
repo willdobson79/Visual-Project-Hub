@@ -1,5 +1,5 @@
 # CLAUDE.md — Visual Project Dashboard (PKM Super Hub)
-**Last Updated:** 21 February 2026 — Iteration 5
+**Last Updated:** 22 February 2026 — Iteration 6
 
 > **SUPERSEDES** `skills.md`. This file is the single source of truth for AI context.
 > **MANDATORY PROTOCOL:** Update this file every 5 iterations automatically.
@@ -50,7 +50,7 @@ Tab → Workspace → Board → Card → Connection
 - **Tab**: Top-level category (e.g. "Master", "Finance", "Travel"). Owns workspaces.
 - **Workspace**: Logical grouping of boards. Linked to a `tabId`.
 - **Board**: Full interactive canvas. Contains cards and connections. Supports TagRules.
-- **Card**: Core data unit — title, description, status, priority, colour, projectRef, tags[], rich content, drawing, attachments.
+- **Card**: Core data unit — title, description, status, priority, colour, projectRef, tags[], category, rich content, drawing, attachments. `isImported` flag marks cards staged in the AI import inbox.
 - **Connection**: Visual edge between two cards on the same board.
 - **TagRule**: Auto-add tag config per board. New cards inherit configured tags.
 - **ChangeHistory**: Point-in-time JSON snapshot of every CRUD op (7-day retention).
@@ -58,16 +58,16 @@ Tab → Workspace → Board → Card → Connection
 
 ---
 
-## Local DB — Dexie.js v4 (`src/lib/db.ts`)
+## Local DB — Dexie.js v5 (`src/lib/db.ts`)
 
-**Schema version: v4.** Always increment for schema changes.
+**Schema version: v5.** Always increment for schema changes.
 
 | Table | Indexed Fields |
 |---|---|
 | `tabs` | `id, userId, name, sortOrder, updatedAt, deletedAt` |
 | `workspaces` | `id, tabId, userId, name, sortOrder, updatedAt, deletedAt` |
 | `boards` | `id, workspaceId, userId, name, updatedAt, deletedAt` |
-| `cards` | `id, boardId, title, status, updatedAt, deletedAt, *tags` |
+| `cards` | `id, boardId, title, status, updatedAt, deletedAt, *tags, category, isImported` |
 | `connections` | `id, boardId, fromCardId, toCardId, updatedAt, deletedAt` |
 | `tagRules` | `id, boardId, tag, updatedAt` |
 | `changeHistory` | `++id, entityType, entityId, action, timestamp, [entityType+entityId]` |
@@ -76,6 +76,7 @@ Tab → Workspace → Board → Card → Connection
 **Key DB helper methods:**
 - `db.findRelatedCards(cardId)` — cross-board tag matching
 - `db.getAllTags()` — global unique tag list
+- `db.getAllCategories()` — global unique category list (used by AI import for context)
 - `db.getAutoTags(boardId)` — auto-add tag rules for a board
 - `db.logChange(entityType, entityId, action, snapshot)` — log to history buffer
 - `db.pruneOldHistory()` — purge entries older than 7 days
@@ -83,6 +84,8 @@ Tab → Workspace → Board → Card → Connection
 - `db.getRecentHistory(limit)` — all changes in the last 7 days
 
 **CRITICAL**: `addToSyncQueue()` automatically captures a snapshot and logs it to `changeHistory` before queuing for cloud sync. ALL CRUD operations are automatically buffered via this method.
+
+**AI Import staging**: `IMPORT_STAGING_BOARD_ID = 'board-import-staging'` — a virtual board ID used to hold cards in the inbox. Cards with `isImported: true` are staged here until dispatched to a real board via `HierarchySelector`.
 
 ---
 
@@ -103,7 +106,7 @@ Tab → Workspace → Board → Card → Connection
 | `tabs` | `id, user_id, name, sort_order, updated_at, deleted_at` |
 | `workspaces` | `id, tab_id (FK→tabs), user_id, name, description, colour, icon, sort_order` |
 | `boards` | `id, workspace_id (FK→workspaces), user_id, name, description, settings (JSONB), is_locked` |
-| `cards` | `id, board_id (FK→boards), position_x/y, width/height, colour, title, description, status, priority, content, z_index, locked, tags (TEXT[]), project_ref` |
+| `cards` | `id, board_id (FK→boards), position_x/y, width/height, colour, title, description, status, priority, content, z_index, locked, tags (TEXT[]), project_ref, category, is_imported` |
 | `connections` | `id, board_id (FK→boards), from_card_id/to_card_id (FK→cards), type, style, colour, label, animated, stroke_width, marker_start, marker_end` |
 | `tag_rules` | `id, board_id (FK→boards), tag, updated_at` |
 | `sync_metadata` | `device_id, last_pulled_at` |
@@ -119,6 +122,40 @@ All FKs: `ON DELETE CASCADE`. Run `node init_pg_schema.js` to create/upgrade.
 - 7-day retention — `pruneOldHistory()` deletes older entries.
 - **Restore workflow**: `db.cards.put(snapshot)` → `db.addToSyncQueue(type, id, 'update')`.
 - **HistoryPanel.tsx**: Slide-out panel with day grouping, entity type filter, search, JSON preview, restore button.
+
+---
+
+## AI Import System
+
+A full pipeline for importing unstructured text into PKM cards via AI:
+
+### Flow
+1. User clicks **"Import with AI"** button in the dashboard sidebar → opens `ImportModal`.
+2. User pastes text or uploads a `.txt`/`.md` file, selects an AI provider (Claude / Gemini / OpenAI), and enters their API key.
+3. Modal POSTs to `/api/ai/parse-note` — the server calls the selected LLM with a structured prompt, passing existing category names for consistency.
+4. AI returns a JSON array of cards: `{ title, description, category, emoji, suggestedPriority }`.
+5. User reviews/edits the parsed cards inline, then clicks **"Save to Inbox"**.
+6. Cards are written to Dexie with `isImported: true` and `boardId: IMPORT_STAGING_BOARD_ID`.
+7. Dashboard switches to the **Import Inbox** view (`ImportInbox` component).
+8. User selects cards and clicks **"Send to Board"** → `HierarchySelector` modal opens.
+9. User picks Tab → Workspace → Board; cards are moved (`boardId` updated, `isImported` cleared, position set).
+
+### AI Provider Details (`/api/ai/parse-note`)
+| Provider | Model | SDK |
+|---|---|---|
+| Claude | `claude-sonnet-4-6` | `@anthropic-ai/sdk` |
+| Gemini | `gemini-2.0-flash` | `@google/generative-ai` |
+| OpenAI | `gpt-4o-mini` | `openai` |
+
+- API keys are stored in `localStorage` under `pkm_ai_settings` — **never** persisted to Dexie or the cloud DB.
+- `splitByParagraph` option splits text on double line-breaks before parsing, useful for multi-topic notes.
+- Existing categories are fetched via `db.getAllCategories()` and passed as context so the AI reuses known categories.
+
+### Dashboard View Switcher
+`page.tsx` manages an `activeView: 'boards' | 'import-inbox' | 'category-filter'` state.
+- **Boards** — default board grid view.
+- **Import Inbox** — shows `ImportInbox` component; sidebar badge displays live count of staged cards.
+- **By Category** — shows `CategoryFilter` component for cross-board card browsing.
 
 ---
 
@@ -155,7 +192,7 @@ All FKs: `ON DELETE CASCADE`. Run `node init_pg_schema.js` to create/upgrade.
 
 | Component | Role |
 |---|---|
-| `src/app/page.tsx` | Dashboard: tab switcher, workspace sidebar, board grid, sync indicator, history access |
+| `src/app/page.tsx` | Dashboard: tab switcher, workspace sidebar, view switcher (Boards / Import Inbox / By Category), board grid, sync indicator, history access |
 | `src/app/board/[id]/page.tsx` | Board canvas: React Flow, tool modes, header, sync indicator |
 | `src/components/board/CardSidebar.tsx` | Card detail: fields, tags, related cards, rich text, drawing |
 | `src/components/board/BoardControls.tsx` | Board actions: lock, export PNG, CSV import, auto-tag config |
@@ -169,6 +206,10 @@ All FKs: `ON DELETE CASCADE`. Run `node init_pg_schema.js` to create/upgrade.
 | `src/components/canvas/GridBackground.tsx` | Canvas background grid |
 | `src/components/dashboard/GlobalStats.tsx` | Dashboard statistics modal |
 | `src/components/dashboard/HistoryPanel.tsx` | 7-day change history with search, filter, point-in-time restore |
+| `src/components/dashboard/ImportModal.tsx` | AI Import modal: paste/upload text, choose provider, parse → review → save to inbox |
+| `src/components/dashboard/ImportInbox.tsx` | Inbox view: review/select/delete staged import cards, dispatch to boards |
+| `src/components/dashboard/CategoryFilter.tsx` | Cross-board card browser filtered by category with sidebar category list |
+| `src/components/dashboard/HierarchySelector.tsx` | Tab → Workspace → Board picker modal for dispatching inbox cards |
 | `src/components/dashboard/NewBoardModal.tsx` | Board creation modal |
 | `src/components/dashboard/NewWorkspaceModal.tsx` | Workspace creation modal |
 | `src/components/global/SyncIndicator.tsx` | Compact push/pull status widget with manual trigger buttons |
@@ -179,6 +220,7 @@ All FKs: `ON DELETE CASCADE`. Run `node init_pg_schema.js` to create/upgrade.
 | `src/lib/utils.ts` | General utilities (`cn` helper) |
 | `src/app/api/sync/route.ts` | Push API (POST — all 6 entity types) |
 | `src/app/api/sync/pull/route.ts` | Pull API (GET — cloud → local) |
+| `src/app/api/ai/parse-note/route.ts` | AI parse API (POST — proxies text to Claude/Gemini/OpenAI, returns card array) |
 
 ---
 
@@ -210,3 +252,7 @@ node init_pg_schema.js    # Create/upgrade PostgreSQL tables
 - Soft-delete pattern: `deletedAt` timestamp field on all major entities.
 - When adding a new entity type to sync, add it to both the push (`/api/sync/route.ts`) and pull (`/api/sync/pull/route.ts`) routes, and to `sync_service.ts`.
 - DB schema changes MUST increment the Dexie version number.
+- AI import cards use `IMPORT_STAGING_BOARD_ID` as a virtual `boardId`. Never navigate to this board — it doesn't exist as a real board entity. Filter it out of board lists with `b.id !== IMPORT_STAGING_BOARD_ID`.
+- `useLiveQuery` ternary fallbacks need explicit type casts when the else-branch returns `Promise.resolve([])`, e.g. `Promise.resolve([] as Workspace[])`, to avoid TypeScript inferring `never[]`.
+- AI provider API keys are stored only in `localStorage` (`pkm_ai_settings`). Never write them to Dexie, the sync queue, or any API other than `/api/ai/parse-note`.
+- `card.category` is a plain `string?` field (not an array). Cross-board category browsing is done client-side by `db.getAllCategories()` — no dedicated DB table needed.
